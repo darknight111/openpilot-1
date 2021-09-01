@@ -244,8 +244,6 @@ static void ui_draw_vision_header(UIState *s) {
   }
   ui_draw_vision_speed(s);
   ui_draw_vision_event(s);
-  // NDA
-  ui_draw_extras(s);
 }
 
 //BB START: functions added for the display of various items
@@ -521,10 +519,6 @@ void ui_nvg_init(UIState *s) {
     {"wheel", "../assets/img_chffr_wheel.png"},
     {"driver_face", "../assets/img_driver_face.png"},
     {"brake_img", "../assets/img_brake_disc.png"},
-    {"img_nda", "../assets/img_nda.png"},
-	{"img_hda", "../assets/img_hda.png"},
-	{"autohold_warning", "../assets/img_autohold_warning.png"},
-	{"autohold_active", "../assets/img_autohold_active.png"},
   };
   for (auto [name, file] : images) {
     s->images[name] = nvgCreateImage(s->vg, file, 1);

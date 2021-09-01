@@ -24,9 +24,6 @@ from selfdrive.controls.lib.alertmanager import AlertManager
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.locationd.calibrationd import Calibration
 from selfdrive.hardware import HARDWARE, TICI
-from selfdrive.road_speed_limiter import road_speed_limiter_get_max_speed, road_speed_limiter_get_active
-from selfdrive.controls.lib.lane_planner import TRAJECTORY_SIZE
-from selfdrive.car.gm.values import SLOW_ON_CURVES, MIN_CURVE_SPEED
 
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
@@ -138,19 +135,6 @@ class Controls:
     self.soft_disable_timer = 0
     self.v_cruise_kph = 255
     self.v_cruise_kph_last = 0
-    # NDA 사용 여부 (Neokii)
-    self.max_speed_clu = 0.
-    self.curve_speed_ms = 0.
-    self.roadLimitSpeedActive = 0
-    self.roadLimitSpeed = 0
-    self.roadLimitSpeedLeftDist = 0
-    self.applyMaxSpeed = 0
-
-    self.slowing_down = False
-    self.slowing_down_alert = False
-    self.slowing_down_sound_alert = False
-    self.active_cam = False
-    
     self.mismatch_counter = 0
     self.can_error_counter = 0
     self.last_blinker_frame = 0
@@ -586,13 +570,6 @@ class Controls:
     steer_angle_without_offset = math.radians(CS.steeringAngleDeg - params.angleOffsetAverageDeg)
     curvature = -self.VM.calc_curvature(steer_angle_without_offset, CS.vEgo)
 
-    # NDA Add.. (PSK)
-    road_limit_speed, left_dist, max_speed_log = self.cal_max_speed(self, self.sm.frame, CS, self.sm)
-    CC.sccSmoother.roadLimitSpeedActive = road_speed_limiter_get_active()
-    CC.sccSmoother.roadLimitSpeed = road_limit_speed
-    CC.sccSmoother.roadLimitSpeedLeftDist = left_dist
-    CC.sccSmoother.applyMaxSpeed = float(self.max_speed_clu * self.speed_conv_to_ms * CV.MS_TO_KPH)
-    CC.sccSmoother.cruiseMaxSpeed = self.v_cruise_kph
     # controlsState
     dat = messaging.new_message('controlsState')
     dat.valid = CS.canValid

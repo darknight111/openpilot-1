@@ -99,7 +99,7 @@ class RoadLimitSpeedServer:
             if broadcast_address is None or frame % 10 == 0:
               broadcast_address = self.get_broadcast_address()
 
-            #print('broadcast_address', broadcast_address)
+            print('broadcast_address', broadcast_address)
 
             if broadcast_address is not None:
               address = (broadcast_address, Port.BROADCAST_PORT)
@@ -262,19 +262,17 @@ class RoadSpeedLimiter:
       # log += ", " + str(section_limit_speed)
       # log += ", " + str(section_left_dist)
 
-      v_ego = CS.out.vEgo / 3.6
+      v_ego = CS.clu11["CF_Clu_Vanz"] / 3.6
 
       if cam_limit_speed_left_dist is not None and cam_limit_speed is not None and cam_limit_speed_left_dist > 0:
 
         diff_speed = v_ego * 3.6 - cam_limit_speed
 
-        #if self.longcontrol:
-        #  sec = interp(diff_speed, [10., 30.], [15., 20.])
-        #else:
-        #  sec = interp(diff_speed, [10., 30.], [17., 23.])
-        
-        sec = interp(diff_speed, [10., 30.], [13., 18.])
-        
+        if self.longcontrol:
+          sec = interp(diff_speed, [10., 30.], [15., 20.])
+        else:
+          sec = interp(diff_speed, [10., 30.], [17., 23.])
+
         if MIN_LIMIT <= cam_limit_speed <= MAX_LIMIT and (self.slowing_down or cam_limit_speed_left_dist < v_ego * sec):
 
           if not self.slowing_down:

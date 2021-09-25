@@ -243,9 +243,14 @@ static void update_vision(UIState *s) {
    if(s->awake)
    {
         int touch_x = -1, touch_y = -1;
-        touch_poll(&(s->touch), &touch_x, &touch_y, 0);
+        //int touched = touch_poll(&(s->touch), &touch_x, &touch_y, 0);
         dashcam(s, touch_x, touch_y);
    }
+   /*{
+   #    int touch_x = -1, touch_y = -1;
+   #     touch_poll(&(s->touch), &touch_x, &touch_y, 0);
+   #     dashcam(s, touch_x, touch_y);
+   #}*/
 #endif
 }
 
@@ -313,7 +318,7 @@ QUIState::QUIState(QObject *parent) : QObject(parent) {
   QObject::connect(timer, &QTimer::timeout, this, &QUIState::update);
   timer->start(0);
 
-  touch_init(&(ui_state.touch));
+  //touch_init(&(ui_state.touch));
 }
 
 void QUIState::update() {

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import os
 import math
+from numbers import Number
 import numpy as np
+
 from cereal import car, log
 from common.numpy_fast import clip
 from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
@@ -12,10 +14,10 @@ from selfdrive.config import Conversions as CV
 from selfdrive.swaglog import cloudlog
 from selfdrive.boardd.boardd import can_list_to_can_capnp
 from selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
-from selfdrive.controls.lib.lane_planner import CAMERA_OFFSET
-from selfdrive.controls.lib.drive_helpers import update_v_cruise, update_v_cruise_regen, initialize_v_cruise
+from selfdrive.controls.lib.lane_planner import CAMERA_OFFSET, TRAJECTORY_SIZE
+from selfdrive.controls.lib.drive_helpers import update_v_cruise, initialize_v_cruise,update_v_cruise_regen
 from selfdrive.controls.lib.drive_helpers import get_lag_adjusted_curvature
-from selfdrive.controls.lib.longcontrol import LongControl, STARTING_TARGET_SPEED
+from selfdrive.controls.lib.longcontrol import LongControl
 from selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from selfdrive.controls.lib.latcontrol_indi import LatControlINDI
 from selfdrive.controls.lib.latcontrol_lqr import LatControlLQR
@@ -24,7 +26,11 @@ from selfdrive.controls.lib.events import Events, ET
 from selfdrive.controls.lib.alertmanager import AlertManager
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.locationd.calibrationd import Calibration
-from selfdrive.hardware import HARDWARE, TICI
+from selfdrive.hardware import HARDWARE, TICI, EON
+from selfdrive.manager.process_config import managed_processes
+from selfdrive.road_speed_limiter import road_speed_limiter_get_max_speed, road_speed_limiter_get_active
+from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_MIN
+from selfdrive.car.gm.values import SLOW_ON_CURVES, MIN_CURVE_SPEED
 
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
@@ -33,7 +39,11 @@ STEER_ANGLE_SATURATION_THRESHOLD = 2.5  # Degrees
 
 SIMULATION = "SIMULATION" in os.environ
 NOSENSOR = "NOSENSOR" in os.environ
-IGNORE_PROCESSES = set(["rtshield", "uploader", "deleter", "loggerd", "logmessaged", "tombstoned", "logcatd", "proclogd", "clocksd", "updated", "timezoned", "manage_athenad"])
+IGNORE_PROCESSES = {"rtshield", "uploader", "deleter", "loggerd", "logmessaged", "tombstoned",
+                    "logcatd", "proclogd", "clocksd", "updated", "timezoned", "manage_athenad"} | \
+                    {k for k, v in managed_processes.items() if not v.enabled}
+
+ACTUATOR_FIELDS = set(car.CarControl.Actuators.schema.fields.keys())
 
 ThermalStatus = log.DeviceState.ThermalStatus
 State = log.ControlsState.OpenpilotState
@@ -42,9 +52,15 @@ Desire = log.LateralPlan.Desire
 LaneChangeState = log.LateralPlan.LaneChangeState
 LaneChangeDirection = log.LateralPlan.LaneChangeDirection
 EventName = car.CarEvent.EventName
+ButtonEvent = car.CarState.ButtonEvent
+SafetyModel = car.CarParams.SafetyModel
 
 
 class Controls:
+  def kph_to_clu(self, kph):
+    speed_conv_to_clu = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
+    return int(kph * CV.KPH_TO_MS * speed_conv_to_clu)
+
   def __init__(self, sm=None, pm=None, can_sock=None):
     config_realtime_process(4 if TICI else 3, Priority.CTRL_HIGH)
 
@@ -65,7 +81,7 @@ class Controls:
     self.sm = sm
     if self.sm is None:
       ignore = ['driverCameraState', 'managerState'] if SIMULATION else None
-      self.sm = messaging.SubMaster(['deviceState', 'pandaState', 'modelV2', 'liveCalibration',
+      self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                      'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
                                      'managerState', 'liveParameters', 'radarState'] + self.camera_packets + joystick_packet,
                                      ignore_alive=ignore, ignore_avg_freq=['radarState', 'longitudinalPlan'])
@@ -79,7 +95,7 @@ class Controls:
       self.log_sock = messaging.sub_sock('androidLog')
 
     # wait for one pandaState and one CAN packet
-    panda_type = messaging.recv_one(self.sm.sock['pandaState']).pandaState.pandaType
+    panda_type =  self.sm['peripheralState'].pandaType
     has_relay = panda_type in [PandaType.blackPanda, PandaType.uno, PandaType.dos]
     print("Waiting for CAN messages...")
     get_one_can(self.can_sock)
@@ -105,7 +121,9 @@ class Controls:
     self.read_only = not car_recognized or not controller_available or \
                        self.CP.dashcamOnly or community_feature_disallowed
     if self.read_only:
-      self.CP.safetyModel = car.CarParams.SafetyModel.noOutput
+      safety_config = car.CarParams.SafetyConfig.new_message()
+      safety_config.safetyModel = car.CarParams.SafetyModel.noOutput
+      self.CP.safetyConfigs = [safety_config]
 
     # Write CarParams for radard
     cp_bytes = self.CP.to_bytes()
@@ -116,13 +134,13 @@ class Controls:
     self.AM = AlertManager()
     self.events = Events()
 
-    self.LoC = LongControl(self.CP, self.CI.compute_gb)
+    self.LoC = LongControl(self.CP)
     self.VM = VehicleModel(self.CP)
 
     if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
       self.LaC = LatControlAngle(self.CP)
     elif self.CP.lateralTuning.which() == 'pid':
-      self.LaC = LatControlPID(self.CP)
+      self.LaC = LatControlPID(self.CP, self.CI)
     elif self.CP.lateralTuning.which() == 'indi':
       self.LaC = LatControlINDI(self.CP)
     elif self.CP.lateralTuning.which() == 'lqr':
@@ -136,6 +154,8 @@ class Controls:
     self.soft_disable_timer = 0
     self.v_cruise_kph = 255
     self.v_cruise_kph_last = 0
+    self.curve_speed_ms = 255.
+    self.v_cruise_kph_limit = 0
     self.mismatch_counter = 0
     self.can_error_counter = 0
     self.last_blinker_frame = 0
@@ -145,17 +165,33 @@ class Controls:
     self.events_prev = []
     self.current_alert_types = [ET.PERMANENT]
     self.logged_comm_issue = False
-    self.v_target = 0.0
-    self.a_target = 0.0
+    self.button_timers = {ButtonEvent.Type.decelCruise: 0, ButtonEvent.Type.accelCruise: 0}
+
+    # NDA 사용 여부 (Neokii)
+    self.max_speed_clu = 0.
+    self.curve_speed_ms = 0.
+    self.roadLimitSpeedActive = 0
+    self.roadLimitSpeed = 0
+    self.roadLimitSpeedLeftDist = 0
+    self.applyMaxSpeed = 0
+
+    self.brake_set_speed_clu = self.kph_to_clu(20)     # 브레이크 최저속도 20km
+    self.min_set_speed_clu = self.kph_to_clu(V_CRUISE_MIN)
+    self.max_set_speed_clu = self.kph_to_clu(V_CRUISE_MAX)
+
+    self.speed_conv_to_clu = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
+    self.speed_conv_to_ms = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
+
+
 
     # TODO: no longer necessary, aside from process replay
     self.sm['liveParameters'].valid = True
 
-    self.startup_event = get_startup_event(car_recognized, controller_available, self.CP.fuzzyFingerprint,
-                                           len(self.CP.carFw) > 0)
+    self.startup_event = get_startup_event(car_recognized, controller_available, len(self.CP.carFw) > 0)
 
     if not sounds_available:
-      self.events.add(EventName.soundsUnavailable, static=True)
+      # self.events.add(EventName.soundsUnavailable, static=True)
+      pass
     if community_feature_disallowed and car_recognized and not self.CP.dashcamOnly:
       self.events.add(EventName.communityFeatureDisallowed, static=True)
     if not car_recognized:
@@ -169,6 +205,58 @@ class Controls:
     # controlsd is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
+
+  def reset(self):
+
+    self.max_speed_clu = 0.
+    self.curve_speed_ms = 0.
+
+    self.slowing_down = False
+    self.slowing_down_alert = False
+    self.slowing_down_sound_alert = False
+
+
+  def get_lead(self, sm):
+    radar = sm['radarState']
+    if radar.leadOne.status:
+      return radar.leadOne
+
+    return None
+
+
+  def get_long_lead_speed(self, vEgo, sm, CS):
+
+    if CS.adaptiveCruise:
+      lead = self.get_lead(sm)
+      if lead is not None:
+        # d : 비전 레이더 거리
+        d = lead.dRel - 5.
+        # vRel : Real Speed
+        # lead의 vrel(상대속도)에 곱해지는 상수라 커지면 더 멀리서 줄이기 시작합니다
+        #if 0. < d < -lead.vRel * (10. + 3.) * 3. and lead.vRel < -1.:
+        if 0. < d < -lead.vRel * (9. + 3.) * 2. and lead.vRel < -1.:
+          t = d / lead.vRel
+          accel = -(lead.vRel / t) * self.speed_conv_to_clu
+          accel *= 1.4
+
+          if accel < 0.:
+            # target_speed = vEgo + accel  # accel 값은 1키로씩 상승한다.
+            # min_set_speed_clu = 5km
+            target_speed = vEgo - accel  # accel 값은 1키로씩 감소한다. (60,59,58,57)
+            # target_speed = max(target_speed, self.min_set_speed_clu)
+            target_speed = max(target_speed, self.brake_set_speed_clu)
+            return target_speed
+
+    return 0
+
+  def update_max_speed(self, max_speed, CS):
+    if not CS.adaptiveCruise or self.max_speed_clu <= 0:
+      self.max_speed_clu = max_speed
+    else:
+      kp = 0.01
+      error = max_speed - self.max_speed_clu
+      self.max_speed_clu = self.max_speed_clu + error * kp
+
 
   def update_events(self, CS):
     """Compute carEvents from carState"""
@@ -188,7 +276,7 @@ class Controls:
       return
 
     # Create events for battery, temperature, disk space, and memory
-    if self.sm['deviceState'].batteryPercent < 1 and self.sm['deviceState'].chargingError:
+    if EON and self.sm['deviceState'].batteryPercent < 1 and self.sm['deviceState'].chargingError:
       # at zero percent battery, while discharging, OP should not allowed
       self.events.add(EventName.lowBattery)
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
@@ -199,10 +287,13 @@ class Controls:
     # TODO: make tici threshold the same
     if self.sm['deviceState'].memoryUsagePercent > (90 if TICI else 65) and not SIMULATION:
       self.events.add(EventName.lowMemory)
+    cpus = list(self.sm['deviceState'].cpuUsagePercent)[:(-1 if EON else None)]
+    if max(cpus, default=0) > 95 and not SIMULATION:
+      self.events.add(EventName.highCpuUsage)
 
     # Alert if fan isn't spinning for 5 seconds
-    if self.sm['pandaState'].pandaType in [PandaType.uno, PandaType.dos]:
-      if self.sm['pandaState'].fanSpeedRpm == 0 and self.sm['deviceState'].fanSpeedPercentDesired > 50:
+    if self.sm['peripheralState'].pandaType in [PandaType.uno, PandaType.dos]:
+      if self.sm['peripheralState'].fanSpeedRpm == 0 and self.sm['deviceState'].fanSpeedPercentDesired > 50:
         if (self.sm.frame - self.last_functional_fan_frame) * DT_CTRL > 5.0:
           self.events.add(EventName.fanMalfunction)
       else:
@@ -234,16 +325,21 @@ class Controls:
     if self.can_rcv_error or not CS.canValid:
       self.events.add(EventName.canError)
 
-    safety_mismatch = self.sm['pandaState'].safetyModel != self.CP.safetyModel or self.sm['pandaState'].safetyParam != self.CP.safetyParam
-    if safety_mismatch or self.mismatch_counter >= 200:
-      self.events.add(EventName.controlsMismatch)
+    for i, pandaState in enumerate(self.sm['pandaStates']):
+      # All pandas must match the list of safetyConfigs, and if outside this list, must be silent
+      if i < len(self.CP.safetyConfigs):
+        safety_mismatch = pandaState.safetyModel != self.CP.safetyConfigs[i].safetyModel or pandaState.safetyParam != self.CP.safetyConfigs[i].safetyParam
+      else:
+        safety_mismatch = pandaState.safetyModel != SafetyModel.silent
+      if safety_mismatch or self.mismatch_counter >= 200:
+        self.events.add(EventName.controlsMismatch)
 
     if not self.sm['liveParameters'].valid:
       self.events.add(EventName.vehicleModelInvalid)
 
     if len(self.sm['radarState'].radarErrors):
       self.events.add(EventName.radarFault)
-    elif not self.sm.valid["pandaState"]:
+    elif not self.sm.valid["pandaStates"]:
       self.events.add(EventName.usbError)
     elif not self.sm.all_alive_and_valid():
       self.events.add(EventName.commIssue)
@@ -264,9 +360,12 @@ class Controls:
       self.events.add(EventName.posenetInvalid)
     if not self.sm['liveLocationKalman'].deviceStable:
       self.events.add(EventName.deviceFalling)
-    if log.PandaState.FaultType.relayMalfunction in self.sm['pandaState'].faults:
-      self.events.add(EventName.relayMalfunction)
-    if self.sm['longitudinalPlan'].fcw or (self.enabled and self.sm['modelV2'].meta.hardBrakePredicted):
+    for pandaState in self.sm['pandaStates']:
+      if log.PandaState.FaultType.relayMalfunction in pandaState.faults:
+        self.events.add(EventName.relayMalfunction)
+    planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
+    model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed
+    if planner_fcw or model_fcw:
       self.events.add(EventName.fcw)
 
     if TICI:
@@ -313,9 +412,9 @@ class Controls:
       v_future = speeds[-1]
     else:
       v_future = 100.0
-    if CS.brakePressed and v_future >= STARTING_TARGET_SPEED \
-      and self.CP.openpilotLongitudinalControl and CS.vEgo < 0.3:
-      self.events.add(EventName.noTarget)
+    #if CS.brakePressed and v_future >= STARTING_TARGET_SPEED \
+      #and self.CP.openpilotLongitudinalControl and CS.vEgo < 0.3:
+      #self.events.add(EventName.noTarget)
 
   def data_sample(self):
     """Receive data from sockets and update carState"""
@@ -327,8 +426,9 @@ class Controls:
     self.sm.update(0)
 
     all_valid = CS.canValid and self.sm.all_alive_and_valid()
-    if not self.initialized and (all_valid or self.sm.frame * DT_CTRL > 3.5):
-      self.CI.init(self.CP, self.can_sock, self.pm.sock['sendcan'])
+    if not self.initialized and (all_valid or self.sm.frame * DT_CTRL > 3.5 or SIMULATION):
+      if not self.read_only:
+        self.CI.init(self.CP, self.can_sock, self.pm.sock['sendcan'])
       self.initialized = True
       Params().put_bool("ControlsReady", True)
 
@@ -346,12 +446,113 @@ class Controls:
     if not self.enabled:
       self.mismatch_counter = 0
 
-    if not self.sm['pandaState'].controlsAllowed and self.enabled:
-      self.mismatch_counter += 1
+    # All pandas not in silent mode must have controlsAllowed when openpilot is enabled
+    for pandaState in self.sm['pandaStates']:
+      if pandaState.safetyModel != SafetyModel.silent and not pandaState.controlsAllowed and self.enabled:
+        self.mismatch_counter += 1
 
     self.distance_traveled += CS.vEgo * DT_CTRL
 
     return CS
+
+  def cal_curve_speed(self, sm, v_ego, frame):
+
+    if frame % 10 == 0:
+      md = sm['modelV2']
+      if md is not None and len(md.position.x) == TRAJECTORY_SIZE and len(md.position.y) == TRAJECTORY_SIZE:
+        x = md.position.x
+        y = md.position.y
+        dy = np.gradient(y, x)
+        d2y = np.gradient(dy, x)
+        curv = d2y / (1 + dy ** 2) ** 1.5
+        curv = curv[5:TRAJECTORY_SIZE - 10]
+        a_y_max = 2.975 - v_ego * 0.0375  # ~1.85 @ 75mph, ~2.6 @ 25mph
+        v_curvature = np.sqrt(a_y_max / np.clip(np.abs(curv), 1e-4, None))
+        model_speed = np.mean(v_curvature) * 0.95
+
+        if model_speed < v_ego:
+          self.curve_speed_ms = float(max(model_speed, 32. * CV.KPH_TO_MS))
+        else:
+          self.curve_speed_ms = 255.
+
+        if np.isnan(self.curve_speed_ms):
+          self.curve_speed_ms = 255.
+      else:
+        self.curve_speed_ms = 255.
+
+    return self.curve_speed_ms
+
+  def cal_max_speed(self, frame: int, vEgo, sm, CS):
+
+      # kph
+      # section_limit_speed * CAMERA_SPEED_FACTOR, section_limit_speed, section_left_dist, first_started, log
+      # apply_limit_speed, road_limit_speed, left_dist, first_started, max_speed_log = road_speed_limiter_get_max_speed(clu11_speed, self.is_metric)
+      apply_limit_speed, road_limit_speed, left_dist, first_started, max_speed_log = \
+        road_speed_limiter_get_max_speed(vEgo, self.is_metric)
+
+      #print("apply_limit_speed : ", apply_limit_speed)
+      #print("road_limit_speed : ", road_limit_speed)
+      #print("left_dist : ", left_dist)
+      #print("first_started : ", first_started)
+      #print("max_speed_log : ", max_speed_log)
+
+      # self, sm, v_ego, frame
+      self.cal_curve_speed(sm, vEgo, frame)
+
+      if SLOW_ON_CURVES and self.curve_speed_ms >= MIN_CURVE_SPEED:
+        max_speed_clu = min(self.v_cruise_kph * CV.KPH_TO_MS, self.curve_speed_ms) * self.speed_conv_to_clu
+      else:
+        max_speed_clu = self.kph_to_clu(self.v_cruise_kph)
+
+
+      #max_speed_log = "{:.1f}/{:.1f}/{:.1f}".format(float(limit_speed),
+      #                                              float(self.curve_speed_ms*self.speed_conv_to_clu),
+      #                                              float(lead_speed))
+
+      max_speed_log = ""
+
+      if apply_limit_speed >= self.kph_to_clu(30):
+
+        # 크루즈 초기 설정 속도 (PSK)
+        # controls.v_cruise_kph : 크루즈 설정 속도
+        if first_started:
+          self.max_speed_clu = self.v_cruise_kph
+
+        max_speed_clu = min(max_speed_clu, apply_limit_speed)
+
+        if self.v_cruise_kph > apply_limit_speed:
+
+          if not self.slowing_down_alert and not self.slowing_down:
+            self.slowing_down_sound_alert = True
+            self.slowing_down = True
+
+          self.slowing_down_alert = True
+
+        else:
+          self.slowing_down_alert = False
+
+      else:
+        self.slowing_down_alert = False
+        self.slowing_down = False
+
+      lead_speed = self.get_long_lead_speed(vEgo, sm, CS)
+      #print("get_long_lead_speed() value : ", lead_speed)
+
+      if lead_speed >= self.min_set_speed_clu:
+        if lead_speed < max_speed_clu:
+          max_speed_clu = min(max_speed_clu, lead_speed)
+
+          if not self.limited_lead:
+            self.max_speed_clu = vEgo + 3.
+            self.limited_lead = True
+      else:
+        self.limited_lead = False
+
+      self.update_max_speed(int(max_speed_clu + 0.5), CS)
+      #print("update_max_speed() value : ", self.max_speed_clu)
+
+      return road_limit_speed, left_dist, max_speed_log
+
 
   def state_transition(self, CS):
     """Compute conditional state transitions and execute actions on state transitions"""
@@ -360,10 +561,11 @@ class Controls:
 
     # if stock cruise is completely disabled, then we can use our own set speed logic
     if CS.adaptiveCruise:
-      self.v_cruise_kph = update_v_cruise(self.v_cruise_kph, CS.buttonEvents, self.enabled, self.is_metric)
+      self.v_cruise_kph = update_v_cruise(self.v_cruise_kph, CS.buttonEvents, self.button_timers, self.enabled, self.is_metric)
       if CS.regenPressed:
         self.v_cruise_kph = update_v_cruise_regen(CS.vEgo, self.v_cruise_kph, CS.regenPressed, self.enabled)
     elif not CS.adaptiveCruise and CS.cruiseState.enabled:
+      self.reset()
       self.v_cruise_kph = 40
 
     # decrease the soft disable timer at every step, as it's reset on
@@ -445,6 +647,7 @@ class Controls:
     long_plan = self.sm['longitudinalPlan']
 
     actuators = car.CarControl.Actuators.new_message()
+    actuators.longControlState = self.LoC.long_control_state
 
     if CS.leftBlinker or CS.rightBlinker:
       self.last_blinker_frame = self.sm.frame
@@ -456,8 +659,9 @@ class Controls:
       self.LoC.reset(v_pid=CS.vEgo)
 
     if not self.joystick_mode:
-      # Gas/Brake PID loop
-      actuators.gas, actuators.brake, self.v_target, self.a_target = self.LoC.update(self.active, CS, self.CP, long_plan)
+      # accel PID loop
+      pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS)
+      actuators.accel = self.LoC.update(self.active, CS, self.CP, long_plan, pid_accel_limits)
 
       # Steering PID loop and lateral MPC
       desired_curvature, desired_curvature_rate = get_lag_adjusted_curvature(self.CP, CS.vEgo,
@@ -469,8 +673,7 @@ class Controls:
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
       if self.sm.rcv_frame['testJoystick'] > 0 and self.active:
-        gb = clip(self.sm['testJoystick'].axes[0], -1, 1)
-        actuators.gas, actuators.brake = max(gb, 0), max(-gb, 0)
+        actuators.accel = 4.0*clip(self.sm['testJoystick'].axes[0], -1, 1)
 
         steer = clip(self.sm['testJoystick'].axes[1], -1, 1)
         # max angle is 45 for angle-based cars
@@ -496,34 +699,45 @@ class Controls:
 
       if len(lat_plan.dPathPoints):
         # Check if we deviated from the path
-        left_deviation = actuators.steer > 0 and lat_plan.dPathPoints[0] < -0.1
-        right_deviation = actuators.steer < 0 and lat_plan.dPathPoints[0] > 0.1
+        left_deviation = actuators.steer > 0 and lat_plan.dPathPoints[0] < -0.115
+        right_deviation = actuators.steer < 0 and lat_plan.dPathPoints[0] > 0.115
 
         if left_deviation or right_deviation:
           self.events.add(EventName.steerSaturated)
 
+    # Ensure no NaNs/Infs
+    for p in ACTUATOR_FIELDS:
+      attr = getattr(actuators, p)
+      if not isinstance(attr, Number):
+        continue
+
+      if not math.isfinite(attr):
+        cloudlog.error(f"actuators.{p} not finite {actuators.to_dict()}")
+        setattr(actuators, p, 0.0)
+
     return actuators, lac_log
+
+  def update_button_timers(self, buttonEvents):
+    # increment timer for buttons still pressed
+    for k in self.button_timers.keys():
+      if self.button_timers[k] > 0:
+        self.button_timers[k] += 1
+
+    for b in buttonEvents:
+      if b.type.raw in self.button_timers:
+        self.button_timers[b.type.raw] = 1 if b.pressed else 0
 
   def publish_logs(self, CS, start_time, actuators, lac_log):
     """Send actuators and hud commands to the car, send controlsstate and MPC logging"""
 
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
+    CC.active = self.active
     CC.actuators = actuators
 
-    CC.cruiseControl.override = True
-    CC.cruiseControl.cancel = not self.CP.pcmCruise or (not self.enabled and CS.cruiseState.enabled)
+    CC.cruiseControl.cancel = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
     if self.joystick_mode and self.sm.rcv_frame['testJoystick'] > 0 and self.sm['testJoystick'].buttons[0]:
       CC.cruiseControl.cancel = True
-
-    # TODO remove car specific stuff in controls
-    # Some override values for Honda
-    # brake discount removes a sharp nonlinearity
-    brake_discount = (1.0 - clip(actuators.brake * 3., 0.0, 1.0))
-    speed_override = max(0.0, (self.LoC.v_pid + CS.cruiseState.speedOffset) * brake_discount)
-    CC.cruiseControl.speedOverride = float(speed_override if self.CP.pcmCruise else 0.0)
-    CC.cruiseControl.accelOverride = float(self.CI.calc_accel_override(CS.aEgo, self.a_target,
-                                                                       CS.vEgo, self.v_target))
 
     CC.hudControl.setSpeed = float(self.v_cruise_kph * CV.KPH_TO_MS)
     CC.hudControl.speedVisible = self.enabled
@@ -571,6 +785,11 @@ class Controls:
     steer_angle_without_offset = math.radians(CS.steeringAngleDeg - params.angleOffsetAverageDeg)
     curvature = -self.VM.calc_curvature(steer_angle_without_offset, CS.vEgo)
 
+
+    #NDA things..
+    road_limit_speed, left_dist, max_speed_log = self.cal_max_speed(self.sm.frame, CS.vEgo, self.sm, CS)
+
+
     # controlsState
     dat = messaging.new_message('controlsState')
     dat.valid = CS.canValid
@@ -600,6 +819,27 @@ class Controls:
     controlsState.startMonoTime = int(start_time * 1e9)
     controlsState.forceDecel = bool(force_decel)
     controlsState.canErrorCounter = self.can_error_counter
+
+    # kph [applyMaxSpeed, cruiseMaxSpeed]
+    controlsState.applyMaxSpeed = float(clip(self.v_cruise_kph, V_CRUISE_MIN, self.max_speed_clu * self.speed_conv_to_ms * CV.MS_TO_KPH))
+    controlsState.cruiseMaxSpeed = self.v_cruise_kph
+
+    #print("CC.applyMaxSpeed : ", controlsState.applyMaxSpeed)
+    #print("CC.cruiseMaxSpeed : ", controlsState.cruiseMaxSpeed)
+
+    # 속도가 낮은걸 기준으로 크루즈 속도 설정 (PSK)
+    #controlsState.vCruise = float(self.v_cruise_kph)
+    #current_cruise_kph = min(controlsState.applyMaxSpeed, controlsState.cruiseMaxSpeed)
+
+    if controlsState.applyMaxSpeed == controlsState.cruiseMaxSpeed:
+      controlsState.vCruise = float(controlsState.cruiseMaxSpeed)
+    elif controlsState.applyMaxSpeed < controlsState.cruiseMaxSpeed:
+      controlsState.vCruise = float(controlsState.applyMaxSpeed)
+
+    controlsState.roadLimitSpeedActive = road_speed_limiter_get_active()
+    controlsState.roadLimitSpeed = road_limit_speed
+    controlsState.roadLimitSpeedLeftDist = left_dist
+
 
     if self.joystick_mode:
       controlsState.lateralControlState.debugState = lac_log
@@ -666,6 +906,8 @@ class Controls:
     # Publish data
     self.publish_logs(CS, start_time, actuators, lac_log)
     self.prof.checkpoint("Sent")
+
+    self.update_button_timers(CS.buttonEvents)
 
   def controlsd_thread(self):
     while True:

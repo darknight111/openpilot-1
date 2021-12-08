@@ -159,7 +159,7 @@ void OffroadHome::hideEvent(QHideEvent *event) {
 }
 
 void OffroadHome::refresh() {
-  date->setText(QDateTime::currentDateTime().toString("yyyy년 M월 d일"));
+  date->setText(QDateTime::currentDateTime().toString("dddd, MMMM d"));
 
   bool updateAvailable = update_widget->refresh();
   int alerts = alerts_widget->refresh();
@@ -178,6 +178,6 @@ void OffroadHome::refresh() {
   update_notif->setVisible(updateAvailable);
   alert_notif->setVisible(alerts);
   if (alerts) {
-    alert_notif->setText(QString::number(alerts) + " 경고" + (alerts > 1 ? "S" : ""));
+    alert_notif->setText(QString::number(alerts) + (alerts > 1 ? " ALERTS" : " ALERT"));
   }
 }

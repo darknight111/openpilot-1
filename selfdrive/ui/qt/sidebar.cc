@@ -2,9 +2,6 @@
 
 #include <QMouseEvent>
 
-
-#include "selfdrive/common/util.h"
-#include "selfdrive/hardware/hw.h"
 #include "selfdrive/ui/qt/util.h"
 
 void Sidebar::drawMetric(QPainter &p, const QString &label, QColor c, int y) {
@@ -46,6 +43,8 @@ void Sidebar::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void Sidebar::updateState(const UIState &s) {
+  if (!isVisible()) return;
+
   auto &sm = *(s.sm);
 
   auto deviceState = sm["deviceState"].getDeviceState();
@@ -71,25 +70,13 @@ void Sidebar::updateState(const UIState &s) {
   }
   setProperty("tempStatus", QVariant::fromValue(tempStatus));
 
-  ItemStatus pandaStatus = {"판다\n연결됨", good_color};
+  ItemStatus pandaStatus = {"VEHICLE\nONLINE", good_color};
   if (s.scene.pandaType == cereal::PandaState::PandaType::UNKNOWN) {
-    pandaStatus = {"판다\n연결안됨", danger_color};
+    pandaStatus = {"NO\nPANDA", danger_color};
   } else if (s.scene.started && !sm["liveLocationKalman"].getLiveLocationKalman().getGpsOK()) {
-    pandaStatus = {"GPS\n검색중", warning_color};
+    pandaStatus = {"GPS\nSEARCHING", warning_color};
   }
   setProperty("pandaStatus", QVariant::fromValue(pandaStatus));
-
-  if(net_type == network_type[cereal::DeviceState::NetworkType::WIFI]) {
-    std::string ip = deviceState.getWifiIpAddress();
-    network_str = ip.c_str();
-  } else {
-    network_str = net_type;
-  }
-//  temp_val = deviceState.getAmbientTempC();
-  batt_perc = deviceState.getBatteryPercent();
-  setProperty("tempVal", deviceState.getAmbientTempC());
-
-
 }
 
 void Sidebar::paintEvent(QPaintEvent *event) {
@@ -116,16 +103,11 @@ void Sidebar::paintEvent(QPaintEvent *event) {
 
   configFont(p, "Open Sans", 35, "Regular");
   p.setPen(QColor(0xff, 0xff, 0xff));
-  const QRect r = QRect(25, 247, 250, 50);
-
-  p.drawText(r, Qt::AlignCenter, network_str);
+  const QRect r = QRect(50, 247, 100, 50);
+  p.drawText(r, Qt::AlignCenter, net_type);
 
   // metrics
-//  drawMetric(p, temp_status.first, temp_status.second, 338);
-//  drawMetric(p, panda_status.first,  panda_status.second, 518);
-//  drawMetric(p, connect_status.first, connect_status.second, 676);
-  QString batt_perc_qstring = QString("BATT: %1 %2").arg(batt_perc).arg("%");
-  drawMetric(p, batt_perc_qstring +"\n"+ QString("%1°C").arg((double)temp_val,4,'f',1), temp_status.second, 338);
-  drawMetric(p, panda_status.first,  panda_status.second, 518);
-  drawMetric(p, "네트워크\n" + connect_status.first, connect_status.second, 676);
+  drawMetric(p, temp_status.first, temp_status.second, 338);
+  drawMetric(p, panda_status.first, panda_status.second, 496);
+  drawMetric(p, connect_status.first, connect_status.second, 654);
 }

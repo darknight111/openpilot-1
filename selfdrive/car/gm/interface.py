@@ -67,9 +67,9 @@ class CarInterface(CarInterfaceBase):
 
     tire_stiffness_factor = 0.5
 
-    ret.minSteerSpeed = 1 * CV.KPH_TO_MS
-    ret.steerRateCost = 0.3625 # def : 2.0
-    ret.steerActuatorDelay = 0.1925  # def: 0.2 Default delay, not measured yet
+    ret.minSteerSpeed = 8 * CV.KPH_TO_MS
+    ret.steerRateCost = 0.5 # def : 2.0
+    ret.steerActuatorDelay = 0.  # def: 0.2 Default delay, not measured yet
 
     ret.minEnableSpeed = -1
     ret.mass = 1625. + STD_CARGO_KG
@@ -77,16 +77,12 @@ class CarInterface(CarInterfaceBase):
     ret.steerRatio = 16.8
     ret.steerRatioRear = 0.
     ret.centerToFront = ret.wheelbase * 0.49 # wild guess
-    ret.lateralTuning.init('lqr')
-
-    ret.lateralTuning.lqr.scale = 1975.0
-    ret.lateralTuning.lqr.ki = 0.032
-    ret.lateralTuning.lqr.a = [0., 1., -0.22619643, 1.21822268]
-    ret.lateralTuning.lqr.b = [-1.92006585e-04, 3.95603032e-05]
-    ret.lateralTuning.lqr.c = [1., 0.]
-    ret.lateralTuning.lqr.k = [-110.73572306, 451.22718255]
-    ret.lateralTuning.lqr.l =  [0.3233671, 0.3185757]
-    ret.lateralTuning.lqr.dcGain = 0.002237852961363602
+    
+    ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[10., 41.0], [10., 41.0]]
+    ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.18, 0.26], [0.01, 0.02]]
+    ret.lateralTuning.pid.kdBP = [0.]
+    ret.lateralTuning.pid.kdV = [0.318]  # very sensitive to changes greater than 0.001
+    ret.lateralTuning.pid.kf = 0.0001
 
     # TODO: get actual value, for now starting with reasonable value for
     # civic and scaling by mass and wheelbase

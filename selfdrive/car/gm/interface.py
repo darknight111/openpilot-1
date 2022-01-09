@@ -81,7 +81,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[10., 41.0], [10., 41.0]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.18, 0.26], [0.01, 0.02]]
     ret.lateralTuning.pid.kdBP = [0.]
-    ret.lateralTuning.pid.kdV = [0.318]  # very sensitive to changes greater than 0.001
+    ret.lateralTuning.pid.kdV = [0.319]  # very sensitive to changes greater than 0.001
     ret.lateralTuning.pid.kf = 0.0001
 
     # TODO: get actual value, for now starting with reasonable value for
@@ -99,7 +99,7 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalTuning.kpBP = [0.0, 5.0, 10.0, 20.0, 35.0] 
     ret.longitudinalTuning.kpV = [0.6, 0.95, 1.19, 1.27, 1.18] 
   
-    ret.longitudinalTuning.kiBP = [0., 130. * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kiBP = [0., 35.]
     ret.longitudinalTuning.kiV = [0.31, 0.26]
 #    ret.longitudinalTuning.kiV = [0.075, 0.05]
     
@@ -109,13 +109,13 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalTuning.deadzoneBP = [0., 30.*CV.KPH_TO_MS]
     ret.longitudinalTuning.deadzoneV = [0., 0.10]
     # ret.longitudinalActuatorDelay = 0.2
-    ret.longitudinalActuatorDelayLowerBound = 0.10
+    ret.longitudinalActuatorDelayLowerBound = 0.15
     ret.longitudinalActuatorDelayUpperBound = 0.15
     
-    ret.startAccel = 0.1
+    ret.startAccel = -0.9
     ret.stopAccel = -2.0
-    ret.startingAccelRate = 1.0
-    ret.stoppingDecelRate = 2.4
+    ret.startingAccelRate = 0.8 # brake_travel/s while releasing on restart
+    ret.stoppingDecelRate = 2.4 # brake_travel/s while trying to stop
     ret.vEgoStopping = 0.5
     ret.vEgoStarting = 0.5
     ret.stoppingControl = True

@@ -112,12 +112,12 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalActuatorDelayLowerBound = 0.15
     ret.longitudinalActuatorDelayUpperBound = 0.15
     
-    ret.startAccel = -1.0
-    ret.stopAccel = -2.0
-    ret.startingAccelRate = 0.8 # brake_travel/s while releasing on restart
+    ret.startAccel = -1.0 # Toyota requets 0 instantly, the hands off to some controller
+    ret.stopAccel = -2.0 # Toyota requests -0.4 when stopped
+    ret.startingAccelRate = 0.6 # brake_travel/s while releasing on restart
     ret.stoppingDecelRate = 2.4 # brake_travel/s while trying to stop
-    ret.vEgoStopping = 0.5
-    ret.vEgoStarting = 0.5
+    ret.vEgoStopping = 0.5 # when car starts requesting stopping accel
+    ret.vEgoStarting = 0.5 needs to be > or == vEgoStopping
     ret.stoppingControl = True
     
     ret.steerLimitTimer = 0.4

@@ -74,9 +74,9 @@ def update_v_cruise(v_cruise_kph, buttonEvents, button_timers, enabled, metric):
         ButtonPrev = b.type
       elif not b.pressed and ButtonCnt:
         if not LongPressed and b.type == ButtonType.accelCruise:
-          v_cruise_kph += 5 if metric else 5 * CV.MPH_TO_KPH
+          v_cruise_kph += 5 if metric else 2 * CV.MPH_TO_KPH
         elif not LongPressed and b.type == ButtonType.decelCruise:
-          v_cruise_kph -= 5 if metric else 5 * CV.MPH_TO_KPH
+          v_cruise_kph -= 5 if metric else 2 * CV.MPH_TO_KPH
         LongPressed = False
         ButtonCnt = 0
     if ButtonCnt > 80:

@@ -81,7 +81,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[10., 41.0], [10., 41.0]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.18, 0.26], [0.01, 0.02]]
     ret.lateralTuning.pid.kdBP = [0.]
-    ret.lateralTuning.pid.kdV = [0.319]  # very sensitive to changes greater than 0.001
+    ret.lateralTuning.pid.kdV = [0.318]  # very sensitive to changes greater than 0.001
     ret.lateralTuning.pid.kf = 0.0001
 
     # TODO: get actual value, for now starting with reasonable value for
@@ -109,10 +109,10 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalTuning.deadzoneBP = [0., 30.*CV.KPH_TO_MS]
     ret.longitudinalTuning.deadzoneV = [0., 0.001]
     # ret.longitudinalActuatorDelay = 0.2
-    ret.longitudinalActuatorDelayLowerBound = 0.15
-    ret.longitudinalActuatorDelayUpperBound = 0.15
+    ret.longitudinalActuatorDelayLowerBound = 0.18
+    ret.longitudinalActuatorDelayUpperBound = 0.18
     
-    ret.startAccel = -1.0 # Toyota requets 0 instantly, the hands off to some controller
+    ret.startAccel = -0.9 # Toyota requets 0 instantly, the hands off to some controller
     ret.stopAccel = -2.0 # Toyota requests -0.4 when stopped
     ret.startingAccelRate = 0.6 # brake_travel/s while releasing on restart
     ret.stoppingDecelRate = 2.4 # brake_travel/s while trying to stop

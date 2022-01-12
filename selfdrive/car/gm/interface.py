@@ -62,8 +62,8 @@ class CarInterface(CarInterfaceBase):
     tire_stiffness_factor = 0.5
 
     ret.minSteerSpeed = 8 * CV.KPH_TO_MS
-    ret.steerRateCost = 0.3625 # def : 2.0
-    ret.steerActuatorDelay = 0.1925  # def: 0.2 Default delay, not measured yet
+    ret.steerRateCost = 0.5 # def : 2.0
+    ret.steerActuatorDelay = 0.0  # def: 0.2 Default delay, not measured yet
 
     ret.minEnableSpeed = -1
     ret.mass = 1625. + STD_CARGO_KG
@@ -71,16 +71,12 @@ class CarInterface(CarInterfaceBase):
     ret.steerRatio = 16.8
     ret.steerRatioRear = 0.
     ret.centerToFront = ret.wheelbase * 0.49 # wild guess
-    ret.lateralTuning.init('lqr')
-
-    ret.lateralTuning.lqr.scale = 1975.0
-    ret.lateralTuning.lqr.ki = 0.032
-    ret.lateralTuning.lqr.a = [0., 1., -0.22619643, 1.21822268]
-    ret.lateralTuning.lqr.b = [-1.92006585e-04, 3.95603032e-05]
-    ret.lateralTuning.lqr.c = [1., 0.]
-    ret.lateralTuning.lqr.k = [-110.73572306, 451.22718255]
-    ret.lateralTuning.lqr.l =  [0.3233671, 0.3185757]
-    ret.lateralTuning.lqr.dcGain = 0.002237852961363602
+    
+    ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[10., 41.0], [10., 41.0]]
+    ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.18, 0.26], [0.01, 0.02]]
+    ret.lateralTuning.pid.kdBP = [0.]
+    ret.lateralTuning.pid.kdV = [0.318]  # very sensitive to changes greater than 0.001
+    ret.lateralTuning.pid.kf = 0.0001
 
     # TODO: get actual value, for now starting with reasonable value for
     # civic and scaling by mass and wheelbase
@@ -92,26 +88,26 @@ class CarInterface(CarInterfaceBase):
                                                                          tire_stiffness_factor=tire_stiffness_factor)
 
     # longitudinal
-    ret.longitudinalTuning.kpBP = [0., 25.*CV.KPH_TO_MS, 40.*CV.KPH_TO_MS, 80.*CV.KPH_TO_MS, 100.*CV.KPH_TO_MS]
-    ret.longitudinalTuning.kpV = [1.80, 0.90, 0.66, 0.57, 0.54]
+    ret.longitudinalTuning.kpBP = [0.0, 5.0, 10.0, 20.0, 35.0]
+    ret.longitudinalTuning.kpV = [0.6, 0.95, 1.19, 1.27, 1.18]
   
-    ret.longitudinalTuning.kiBP = [0., 130. * CV.KPH_TO_MS]
-    ret.longitudinalTuning.kiV = [0.18, 0.12]
+    ret.longitudinalTuning.kiBP = [0., 35.]
+    ret.longitudinalTuning.kiV = [0.31, 0.26]
     
     ret.longitudinalTuning.deadzoneBP = [0., 30.*CV.KPH_TO_MS]
-    ret.longitudinalTuning.deadzoneV = [0., 0.10]
-    ret.longitudinalActuatorDelayLowerBound = 0.15
-    ret.longitudinalActuatorDelayUpperBound = 0.2
+    ret.longitudinalTuning.deadzoneV = [0., 0.001]
+    ret.longitudinalActuatorDelayLowerBound = 0.18
+    ret.longitudinalActuatorDelayUpperBound = 0.18
     
-    ret.startAccel = -0.8
-    ret.stopAccel = -2.0
-    ret.startingAccelRate = 5.0
-    ret.stoppingDecelRate = 0.3
-    ret.vEgoStopping = 0.6
-    ret.vEgoStarting = 0.5
-    ret.stoppingControl = True
+    ret.startAccel = -0.8 # Required acceleraton to overcome creep braking
+    ret.stopAccel = -2.0 # Required acceleraton to keep vehicle stationary
+    ret.startingAccelRate = 0.8 # release brakes fast, brake_travel/s while releasing on restart
+    ret.stoppingDecelRate = 0.3 # reach stopping target smoothly, brake_travel/s while trying to stop
+    ret.vEgoStopping = 0.6 # Speed at which the car goes into stopping state, when car starts requesting stopping accel
+    ret.vEgoStarting = 0.5 # Speed at which the car goes into starting state, needs to be > or == vEgoStopping
+    ret.stoppingControl = True # Does the car allows full control even at lows speeds when stopping
     
-    ret.steerLimitTimer = 0.4
+    ret.steerLimitTimer = 0.4 # time before steerLimitAlert is issued
     ret.radarTimeStep = 0.0667  # GM radar runs at 15Hz instead of standard 20Hz
 
     return ret

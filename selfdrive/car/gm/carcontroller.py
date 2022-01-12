@@ -22,14 +22,14 @@ def accel_hysteresis(accel, accel_steady):
 
     return accel, accel_steady
 
-def compute_gas_brake(accel, speed):
-  creep_brake = 0.0
-  creep_speed = 2.3
-  creep_brake_value = 0.15
-  if speed < creep_speed:
-    creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
-  gb = float(accel) / 6 - creep_brake
-  return clip(gb, 0.0, 1.0), clip(-gb, 0.0, 1.0)
+#def compute_gas_brake(accel, speed):
+#  creep_brake = 0.0
+#  creep_speed = 2.3
+#  creep_brake_value = 0.15
+#  if speed < creep_speed:
+#    creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
+#  gb = float(accel) / 6 - creep_brake
+#  return clip(gb, 0.0, 1.0), clip(-gb, 0.0, 1.0)
 
 class CarController():
   def __init__(self, dbc_name, CP, VM):
@@ -51,12 +51,12 @@ class CarController():
 
     P = self.params
     
-    if enabled:
-      accel = actuators.accel
-      gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo)
-    else:
-      accel = 0.0
-      gas, brake = 0.0, 0.0
+#    if enabled:
+#      accel = actuators.accel
+#      gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo)
+#    else:
+#      accel = 0.0
+#      gas, brake = 0.0, 0.0
 
     # Send CAN commands.
     can_sends = []
@@ -95,13 +95,13 @@ class CarController():
     if not enabled or not CS.adaptive_Cruise or not CS.CP.enableGasInterceptor:
       comma_pedal = 0
     elif CS.adaptive_Cruise:
-      gas_mult = interp(CS.out.vEgo, [0., 10.], [0.4, 1.0])
-      comma_pedal = clip(gas_mult * (gas - brake), 0., 1.)
+#      gas_mult = interp(CS.out.vEgo, [0., 10.], [0.4, 1.0])
+#      comma_pedal = clip(gas_mult * (gas - brake), 0., 1.)
     
-#      minimumPedalOutputBySpeed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-#      pedal_accel = actuators.accel * 0.45
-#      comma_pedal = clip(pedal_accel, minimumPedalOutputBySpeed, 1.)
-#      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
+      minimumPedalOutputBySpeed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
+      pedal_accel = actuators.accel * 0.475
+      comma_pedal = clip(pedal_accel, minimumPedalOutputBySpeed, 1.)
+      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
             
 #      if actuators.accel < 0.1:
 #        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))

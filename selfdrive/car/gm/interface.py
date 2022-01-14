@@ -75,7 +75,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[10., 41.0], [10., 41.0]]
     ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.18, 0.26], [0.01, 0.02]]
     ret.lateralTuning.pid.kdBP = [0.]
-    ret.lateralTuning.pid.kdV = [0.321]  # very sensitive to changes greater than 0.001
+    ret.lateralTuning.pid.kdV = [0.322]  # very sensitive to changes greater than 0.001
     ret.lateralTuning.pid.kf = 0.0001
 
     # TODO: get actual value, for now starting with reasonable value for
@@ -96,8 +96,8 @@ class CarInterface(CarInterfaceBase):
     
     ret.longitudinalTuning.deadzoneBP = [0.]
     ret.longitudinalTuning.deadzoneV = [0.]
-    ret.longitudinalActuatorDelayLowerBound = 0.16 # seconds
-    ret.longitudinalActuatorDelayUpperBound = 0.16
+    ret.longitudinalActuatorDelayLowerBound = 0.15 # seconds
+    ret.longitudinalActuatorDelayUpperBound = 0.15
     
     ret.startAccel = -0.8 # Required acceleraton to overcome creep braking
     ret.stopAccel = -2.0 # Required acceleraton to keep vehicle stationary

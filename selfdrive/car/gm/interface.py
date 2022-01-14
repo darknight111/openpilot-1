@@ -94,17 +94,17 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalTuning.kiBP = [0., 35.]
     ret.longitudinalTuning.kiV = [0.31, 0.26]
     
-    ret.longitudinalTuning.deadzoneBP = [0., 30.*CV.KPH_TO_MS]
-    ret.longitudinalTuning.deadzoneV = [0., 0.0001]
-    ret.longitudinalActuatorDelayLowerBound = 0.15
+    ret.longitudinalTuning.deadzoneBP = [0.]
+    ret.longitudinalTuning.deadzoneV = [0.]
+    ret.longitudinalActuatorDelayLowerBound = 0.15 # seconds
     ret.longitudinalActuatorDelayUpperBound = 0.15
     
-    ret.startAccel = -1.0 # Required acceleraton to overcome creep braking
-    ret.stopAccel = -1.8 # Required acceleraton to keep vehicle stationary
-    ret.startingAccelRate = 0.8 # release brakes fast, brake_travel/s while releasing on restart
-    ret.stoppingDecelRate = 0.5 # reach stopping target smoothly, brake_travel/s while trying to stop
-    ret.vEgoStopping = 0.7 # Speed at which the car goes into stopping state, when car starts requesting stopping accel
-    ret.vEgoStarting = 0.7 # Speed at which the car goes into starting state, needs to be > or == vEgoStopping
+    ret.startAccel = -0.8 # Required acceleraton to overcome creep braking
+    ret.stopAccel = -2.0 # Required acceleraton to keep vehicle stationary
+    ret.startingAccelRate = 0.9 # release brakes fast, brake_travel/s while releasing on restart
+    ret.stoppingDecelRate = 2.4 # reach stopping target smoothly, brake_travel/s while trying to stop
+    ret.vEgoStopping = 0.5 # Speed at which the car goes into stopping state, when car starts requesting stopping accel
+    ret.vEgoStarting = 0.5 # Speed at which the car goes into starting state, when car starts requesting starting accel, needs to be > or == vEgoStopping to avoid state transition oscillation
     ret.stoppingControl = True # Does the car allows full control even at lows speeds when stopping
     
     ret.steerLimitTimer = 0.4 # time before steerLimitAlert is issued

@@ -109,8 +109,8 @@ class CarInterface(CarInterfaceBase):
     ret.longitudinalTuning.deadzoneBP = [0., 30.*CV.KPH_TO_MS]
     ret.longitudinalTuning.deadzoneV = [0., 0.001]
     # ret.longitudinalActuatorDelay = 0.2
-    ret.longitudinalActuatorDelayLowerBound = 0.18
-    ret.longitudinalActuatorDelayUpperBound = 0.18
+    ret.longitudinalActuatorDelayLowerBound = 0.15
+    ret.longitudinalActuatorDelayUpperBound = 0.15
     
     ret.startAccel = -0.9 # Toyota requets 0 instantly, the hands off to some controller
     ret.stopAccel = -2.0 # Toyota requests -0.4 when stopped
